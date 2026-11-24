@@ -25,7 +25,7 @@ interpreter or kernel `thymio-bomr`. Filtering tests: `cd FilteringnMotionContro
 |------|------|
 | `main.py` | Camera → `vision.py` (every frame) → global path planned once (frozen, `r` to replan) → drawn on the camera view |
 | `config.py` | Shared constants and conventions (map size, robot radius, padding) |
-| `vision.py` | Homography from the 4 orange beacons, obstacles (raw, not padded), goal, robot pose |
+| `vision.py` | ArUco: homography from the 4 corner markers (IDs 0-3), robot pose from marker ID 4; colour: green obstacles (raw, not padded), red goal |
 | `global_nav_lib.py` | Global navigation: shapely for padding, extremitypathfinder for visibility graph + shortest path |
 
 ```python
@@ -40,8 +40,8 @@ All in **millimetres**, origin **bottom-left**, x right, y up.
 obstacles = [[(x1, y1), (x2, y2), (x3, y3), ...],   # obstacle 1, corners in order around it
              [(x1, y1), (x2, y2), ...],              # obstacle 2
              ...]
-start   = (x, y)        # centre of the Thymio BODY (midpoint of the blue/green markers)
-heading = theta         # radians, 0 = +x, counter-clockwise positive (blue -> green marker)
+start   = (x, y)        # centre of the Thymio BODY = centre of ArUco marker ID 4
+heading = theta         # radians, 0 = +x, counter-clockwise positive (towards the marker's printed top edge)
 goal    = (x, y)        # centre of the red goal
 ```
 
@@ -57,12 +57,13 @@ last (`None` if there is no path).
 ## Method
 
 1. **Padding (configuration space).** The robot is reduced to one point, the centre of its
-   body. Each obstacle is grown by `PADDING_MM = ROBOT_RADIUS_MM + MARGIN_MM = 56 + 10 = 66 mm`
+   body. Each obstacle is grown by `PADDING_MM = ROBOT_RADIUS_MM + MARGIN_MM = 56 + 20 = 76 mm`
    (`config.py`). If the point stays out of the grown obstacles, the real robot does not touch
    the real obstacles. The walls are not grown (`WALL_PADDING_MM = 0`).
    - `ROBOT_RADIUS_MM = 56`: half the body size (Thymio ≈ 110 × 112 mm). The rear corners are
      ~79 mm from the centre and can clip an obstacle when the robot turns right next to it.
-   - `MARGIN_MM = 10`: error of vision / localisation / motion control.
+   - `MARGIN_MM = 20`: error of vision / localisation / motion control, and vision's outline
+     simplification (`approxPolyDP`, epsilon = 2% of the perimeter) can cut up to ~9 mm into an obstacle.
 2. **Visibility graph.** Nodes = start, goal and the corners of the free space where a path can
    bend. Two nodes are linked if the straight segment between them stays in the free space.
    Edge cost = Euclidean length. The shortest path in a polygonal map always goes from
@@ -73,7 +74,7 @@ last (`None` if there is no path).
 
 Checks done: on 1000 random maps the library gave the same path length as an independent
 implementation (our own visibility graph + A*, removed since), and on 500 random maps of the
-real size (976 × 413 mm, padding 66 mm) no path segment enters a padded obstacle.
+real size (976 × 413 mm, padding 66 and 76 mm) no path segment enters a padded obstacle.
 
 ## Libraries and their parameters
 

@@ -3,8 +3,9 @@
     camera -> vision (map, obstacles, goal, robot pose) -> global path -> drawn on the camera view
 
 Vision runs on EVERY frame (later the camera also measures the robot pose for the filter).
-Obstacles and goal are taken ONCE: the path is planned on the first frame where the beacons,
-the robot and the goal are all found, then the obstacles, goal and path are frozen.
+Obstacles and goal are taken ONCE: the path is planned on the first frame where the 4 corner
+markers, the robot and the goal are all found, then the obstacles, goal and path are frozen.
+The map (homography) is also computed once: if the camera moves, restart the program.
 
 Run with:  conda activate thymio-bomr  then
     python main.py            camera 1 (default)
@@ -54,20 +55,26 @@ def draw(dbg, plan, status, show_edges):
 
 
 def run_camera(index):
-    cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)          # CAP_DSHOW: opens faster on Windows
+    cap = cv2.VideoCapture(index)                         # default backend: works on Windows/Mac/Linux
     if not cap.isOpened():
         sys.exit(f"Could not open camera {index} - try another index (0, 1, 2...).")
 
     H_cache, plan, want_plan, last_reason, show_edges = None, None, True, None, False
+    failed = 0
     while True:
         ok, frame = cap.read()
-        if not ok:
-            break
+        if not ok:                                         # dropped frame: skip it
+            failed += 1
+            if failed > 50:
+                print("Camera stopped sending images.")
+                break
+            continue
+        failed = 0
         r, dbg = vision.process(frame, H_cache)
         if r is None:                                      # no homography yet: raw frame
-            status = "corner beacons not found"
+            status = "corner markers (ArUco 0-3) not found"
         else:
-            H_cache = r["homography"]                      # keep the last good warp
+            H_cache = r["homography"]                      # map found once, then kept fixed
             if want_plan:
                 plan, reason = make_plan(r)
                 if plan is not None:
@@ -96,7 +103,7 @@ def run_image(filename):
         sys.exit(f"Could not read the image '{filename}' - check the file name.")
     r, dbg = vision.process(img)
     if r is None:
-        sys.exit("Could not find the 4 corner beacons - check the orange HSV range.")
+        sys.exit(f"Could not find the 4 corner markers (ArUco IDs {vision.CORNER_IDS}).")
     vision.print_result(r)
     plan, reason = make_plan(r)
     if plan is None:
@@ -107,7 +114,7 @@ def run_image(filename):
 
 
 if __name__ == "__main__":
-    src = sys.argv[1] if len(sys.argv) > 1 else "1"       # default: camera 1 (external webcam)
+    src = sys.argv[1] if len(sys.argv) > 1 else str(vision.CAMERA_INDEX)
     if src.isdigit():
         run_camera(int(src))
     else:

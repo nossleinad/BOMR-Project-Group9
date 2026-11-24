@@ -1,147 +1,113 @@
 
+
 import sys
 import math
 import cv2
 import numpy as np
 
 
-from config import MAP_W_MM, MAP_H_MM   # shared with global navigation
-
+from config import MAP_W_MM, MAP_H_MM   # distance between the CENTRES of the corner markers (shared with global nav)
 PX_PER_MM = 1.0
-# Obstacles are returned RAW (real outline): the robot-size padding is done by global navigation
-# (config.PADDING_MM). Put a value > 0 here only to grow them in vision as well.
-OBSTACLE_DILATION_MM = 0
 
+ARUCO_DICT = cv2.aruco.DICT_4X4_50
+CORNER_IDS = [0, 1, 2, 3]       # marker IDs at: top-left, top-right, bottom-right, bottom-left of the map
+ROBOT_ID = 4                    # marker ID on the robot
 
 HSV = {
-    "orange": [((5, 120, 120), (20, 255, 255))],
-    "red":    [((0, 120, 80), (4, 255, 255)), ((170, 120, 80), (179, 255, 255))],  # red wraps around 0
-    "green":  [((60, 80, 50), (90, 255, 255))],
-    "blue":   [((95, 120, 50), (130, 255, 255))],
+    "red":   [((0, 100, 80), (8, 255, 255)), ((170, 100, 80), (179, 255, 255))],   # goal (red wraps around 0)
+    "green": [((40, 70, 35), (100, 255, 255))],                                       # obstacles
 }
 
-BLACK_V_MAX = 70         
-MIN_BLOB_AREA = 100
+MIN_GOAL_AREA_MM2 = 100         # smaller red blobs = noise
+MIN_OBSTACLE_AREA_MM2 = 2000    
+MIN_GOAL_AREA = MIN_GOAL_AREA_MM2 * PX_PER_MM ** 2
+MIN_OBSTACLE_AREA = MIN_OBSTACLE_AREA_MM2 * PX_PER_MM ** 2
+CAMERA_INDEX = 1
 
-BLACK_S_MAX = 80  
-
-         
-def color_mask(hsv_img, name):
-
-    binary_mask = np.zeros(hsv_img.shape[:2], np.uint8)
-    for low , high in HSV[name]:
-        binary_mask |= cv2.inRange(hsv_img, np.array(low) , np.array(high))
-    kernel = np.ones((5,5),np.uint8)
-    binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, kernel)
-    binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel)   
-
-    return binary_mask
+_detector = cv2.aruco.ArucoDetector(cv2.aruco.getPredefinedDictionary(ARUCO_DICT),
+                                    cv2.aruco.DetectorParameters())
 
 
-def blobs(mask, max_area_frac=0.10):
-
-    blob_list = []
-    contours,_=cv2.findContours(mask, cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
-    for cnt in contours :
-        area = cv2.contourArea(cnt)
-        if area < MIN_BLOB_AREA or area > max_area_frac * MAP_H_MM * MAP_W_MM:
-            continue
-        m = cv2.moments(cnt)
-        blob_list.append (((m["m10"] / m["m00"] , m["m01"] / m["m00"]), cnt, area))
-    blob_list.sort(key=lambda b: b[2], reverse=True)
-
-    return [(centroids) for centroids , cnt , area in blob_list]
-
-
-def order_corners(pts):
-    pts = np.array(pts, dtype=np.float32)
-    s = pts.sum(axis=1)
-    d = np.diff(pts, axis=1).ravel() 
-    return np.array([pts[np.argmin(s)], pts[np.argmin(d)],pts[np.argmax(s)], pts[np.argmax(d)]], dtype=np.float32)
-
-
-def px_to_mm(p): 
-    return (p[0] / PX_PER_MM , MAP_H_MM - p[1]/ PX_PER_MM)
+def detect_markers(img):
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    corners, ids, _ = _detector.detectMarkers(gray)
+    if ids is None:
+        return {}
+    return {int(i): c.reshape(4, 2) for i, c in zip(ids.ravel(), corners)}
 
 
 def find_homography(img):
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    found = blobs(color_mask(hsv, "orange"))
-    if len(found) < 4:
+
+    markers = detect_markers(img)
+    if not all(i in markers for i in CORNER_IDS):
         return None
-    src = order_corners(found[:4])
+    src = np.array([markers[i].mean(axis=0) for i in CORNER_IDS], dtype=np.float32)   
     W, H = int(MAP_W_MM * PX_PER_MM), int(MAP_H_MM * PX_PER_MM)
-    dst = np.array([[0, 0], [W, 0], [W, H], [0, H]], dtype=np.float32)
+    dst = np.array([[0, 0], [W, 0], [W, H], [0, H]], dtype=np.float32)           
     return cv2.getPerspectiveTransform(src, dst), (W, H)
 
 
+def raw_to_mm(pts, M):
 
+    w = cv2.perspectiveTransform(np.asarray(pts, dtype=np.float32).reshape(-1, 1, 2), M).reshape(-1, 2)
+    return [px_to_mm(p) for p in w]
+
+
+def px_to_mm(p):
+
+    return (float(p[0]) / PX_PER_MM, MAP_H_MM - float(p[1]) / PX_PER_MM)
+
+
+def detect_robot(img, M):
+    """Robot pose (x, y, theta) in mm / rad from the robot marker, or None if not visible.
+    Detected on the RAW image (sharper than the warped one), then converted to the map."""
+    markers = detect_markers(img)
+    if ROBOT_ID not in markers:
+        return None
+    tl, tr, br, bl = raw_to_mm(markers[ROBOT_ID], M)
+    x = (tl[0] + tr[0] + br[0] + bl[0]) / 4                       
+    y = (tl[1] + tr[1] + br[1] + bl[1]) / 4
+    front = ((tl[0] + tr[0]) / 2, (tl[1] + tr[1]) / 2)               
+    theta = math.atan2(front[1] - y, front[0] - x)
+    return x, y, theta
+
+
+def color_mask(hsv_img, name):
+    mask = np.zeros(hsv_img.shape[:2], np.uint8)
+    for lo, hi in HSV[name]:
+        mask |= cv2.inRange(hsv_img, np.array(lo), np.array(hi))
+    kernel = np.ones((5, 5), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)    # remove specks
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)   # fill small holes
+    return mask
+
+
+def detect_goal(warped):
+    """Centre of the biggest red blob, in mm, or None."""
+    mask = color_mask(cv2.cvtColor(warped, cv2.COLOR_BGR2HSV), "red")
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours = [c for c in contours if cv2.contourArea(c) >= MIN_GOAL_AREA]
+    if not contours:
+        return None
+    m = cv2.moments(max(contours, key=cv2.contourArea))
+    return px_to_mm((m["m10"] / m["m00"], m["m01"] / m["m00"]))
 
 
 def detect_obstacles(warped):
-    hsv = cv2.cvtColor(warped, cv2.COLOR_BGR2HSV)
-
-    # 1. black = dark (low V) AND colourless (low S) -> a dark green or blue is no longer "black"
-    mask_black = ((hsv[:, :, 2] < BLACK_V_MAX) & (hsv[:, :, 1] < BLACK_S_MAX)).astype(np.uint8) * 255
-    mask_black = cv2.morphologyEx(mask_black, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
-
-    # 2. keep only the real obstacles BEFORE padding, so small shadows don't get blown up
-    contours, _ = cv2.findContours(mask_black, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    keep = [c for c in contours if cv2.contourArea(c) >= 20 * MIN_BLOB_AREA]
-    clean = np.zeros_like(mask_black)
-    cv2.drawContours(clean, keep, -1, 255, thickness=-1)        # redraw them filled
-
-    # 3. pad (off by default: global navigation pads the obstacles itself)
-    pad_px = int(OBSTACLE_DILATION_MM * PX_PER_MM)
-    if pad_px > 0:
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * pad_px + 1, 2 * pad_px + 1))
-        clean = cv2.dilate(clean, kernel)
-
-    # 4. outline -> corners -> mm (small fixed epsilon so the corners don't cut into the padding)
-    contours, _ = cv2.findContours(clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    mask = color_mask(cv2.cvtColor(warped, cv2.COLOR_BGR2HSV), "green")
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     obstacles = []
     for c in contours:
-        poly = cv2.approxPolyDP(c, 3, True)                    # 3 px instead of 2% of the perimeter
+        if cv2.contourArea(c) < MIN_OBSTACLE_AREA:                      # too small: noise
+            continue
+        poly = cv2.approxPolyDP(c, 0.02 * cv2.arcLength(c, True), True)  # real corners only
         obstacles.append([px_to_mm(p[0]) for p in poly])
     return obstacles
 
 
-def detect_goal(warped):
-    hsv = cv2.cvtColor(warped, cv2.COLOR_BGR2HSV)
-    red_mask = color_mask(hsv , "red")
-    red_blob = blobs(red_mask, max_area_frac=0.1)
-    if not red_blob:             
-        return None
-    return px_to_mm(red_blob[0])
+def process(img, hom=None):
 
-
-def detect_robot(warped):
-
-    hsv = cv2.cvtColor(warped, cv2.COLOR_BGR2HSV)
-    
-    blue_mask = color_mask(hsv , "blue")
-    green_mask = color_mask(hsv , "green")
-    
-    green_blob = blobs(green_mask,max_area_frac=0.1)
-    blue_blob = blobs(blue_mask, max_area_frac=0.1)
-    if not blue_blob or not green_blob:
-        return None         #let kalman filter later
-    
-    green = green_blob[0]
-    blue = min(blue_blob, key=lambda bl: math.dist(bl, green)) 
-    
-    bm, gm = px_to_mm(blue), px_to_mm(green)
-
-    # position = midpoint of the markers = centre of the robot body; heading = blue -> green
-    x, y = (bm[0] + gm[0]) / 2, (bm[1] + gm[1]) / 2
-    theta = math.atan2(gm[1] - bm[1], gm[0] - bm[0])
-
-    return x , y , theta
-
-
-def process(img, H_cache=None):
-
-    hom = find_homography(img) or H_cache
+    hom = hom or find_homography(img)
     if hom is None:
         return None, img
     M, size = hom
@@ -150,21 +116,21 @@ def process(img, H_cache=None):
         "homography": hom,
         "obstacles": detect_obstacles(warped),
         "goal": detect_goal(warped),
-        "robot": detect_robot(warped),
+        "robot": detect_robot(img, M),
     }
     return result, draw_debug(warped, result)
- 
+
 
 def draw_debug(warped, r):
     out = warped.copy()
     to_px = lambda p: (int(p[0] * PX_PER_MM), int((MAP_H_MM - p[1]) * PX_PER_MM))
     for poly in r["obstacles"]:
-        cv2.polylines(out, [np.array([to_px(p) for p in poly])], True, (255, 0, 255), 2)
+        cv2.polylines(out, [np.array([to_px(p) for p in poly])], True, (255, 0, 255), 2)       # magenta
         for p in poly:
             cv2.circle(out, to_px(p), 5, (255, 0, 255), -1)
-    if r["goal"]:
+    if r["goal"] is not None:
         cv2.drawMarker(out, to_px(r["goal"]), (0, 0, 255), cv2.MARKER_CROSS, 30, 3)
-    if r["robot"]:
+    if r["robot"] is not None:
         x, y, th = r["robot"]
         c = to_px((x, y))
         tip = to_px((x + 60 * math.cos(th), y + 60 * math.sin(th)))
@@ -199,40 +165,55 @@ def print_result(r):
     for i, poly in enumerate(r["obstacles"]):
         print(f"  {i}: " + ", ".join(f"({x:.0f},{y:.0f})" for x, y in poly))
     print("goal (mm):", None if r["goal"] is None else tuple(round(v) for v in r["goal"]))
-    if r["robot"]:
+    if r["robot"] is not None:
         x, y, th = r["robot"]
         print(f"robot: x={x:.0f} mm  y={y:.0f} mm  heading={math.degrees(th):.1f} deg")
     else:
         print("robot: not found")
+    print("-" * 40)
 
 
 if __name__ == "__main__":
-    src = sys.argv[1] if len(sys.argv) > 1 else "1"     # default: camera 1 (external webcam)
+    src = sys.argv[1] if len(sys.argv) > 1 else str(CAMERA_INDEX)
 
-    if src.isdigit():                                    # a number -> live camera
-        cap = cv2.VideoCapture(int(src), cv2.CAP_DSHOW)  # CAP_DSHOW: opens faster on Windows
+    if src.isdigit():                                    # live camera
+        cap = cv2.VideoCapture(int(src))
         if not cap.isOpened():
             sys.exit(f"Could not open camera {src} - try another index (0, 1, 2...).")
-        H_cache = None
+        hom, failed, frame_no = None, 0, 0
         while True:
             ok, frame = cap.read()
-            if not ok:
-                break
-            r, dbg = process(frame, H_cache)
-            if r is not None:
-                H_cache = r["homography"]                # keep the last good warp
+            if not ok:                                     # dropped frame: skip it
+                failed += 1
+                if failed > 50:
+                    print("Camera stopped sending images.")
+                    break
+                continue
+            failed = 0
+            frame_no += 1
+
+            if hom is None:
+                hom = find_homography(frame)               # computed once: the camera doesn't move
+                if hom is not None:
+                    print("Map found (4 corner markers) - homography fixed. Restart if the camera moves.")
+
+            r, dbg = process(frame, hom)
             cv2.imshow("vision", dbg)
-            if cv2.waitKey(1) & 0xFF == ord("q"):        # press q to quit
+            key = cv2.waitKey(1) & 0xFF
+            if r is not None and (key == ord("p") or frame_no % 60 == 0):   # print on 'p' or every ~2 s
+                print_result(r)
+            if key == ord("q"):
                 break
         cap.release()
         cv2.destroyAllWindows()
 
-    else:                                                # otherwise -> image file
+    else:                                                  # image file
         img = cv2.imread(src)
         if img is None:
             sys.exit(f"Could not read the image '{src}' - check the file name.")
         r, dbg = process(img)
         if r is None:
-            sys.exit("Could not find the 4 corner beacons - check the orange HSV range.")
+            sys.exit("Could not find the 4 corner markers (IDs %s)." % CORNER_IDS)
         print_result(r)
         cv2.imwrite("vision_debug.png", dbg)
+        print("debug image written to vision_debug.png")
