@@ -6,11 +6,6 @@ import cv2
 import numpy as np
 
 
-# ======================================================================
-# CONFIG
-# ======================================================================
-# Distance between the CENTRES of the corner markers, measured on the real map with a ruler.
-
 MAP_W_MM = 976  #need to change it , distance between the centers 2 qr codes
 MAP_H_MM = 413  #same thing here
 PX_PER_MM = 1.0
@@ -100,7 +95,6 @@ def detect_goal(warped):
 
 
 def detect_obstacles(warped):
-    """Return a list of obstacles, each a list of (x, y) corners in mm, in order along the boundary."""
     mask = color_mask(cv2.cvtColor(warped, cv2.COLOR_BGR2HSV), "green")
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     obstacles = []
