@@ -14,12 +14,12 @@ from shapely.geometry.polygon import orient
 from global_nav_mix import pad_obstacles, polygons_of, EPS
 
 
-def plan_path(obstacles, start, goal, padding, map_size):
+def plan_path(obstacles, start, goal, padding, map_size, wall_padding=None):
     """Shortest path from start to goal avoiding the padded obstacles.
 
     Same inputs / outputs as global_nav_mix.plan_path.
     """
-    blocked, free_space = pad_obstacles(obstacles, padding, map_size)
+    blocked, free_space = pad_obstacles(obstacles, padding, map_size, wall_padding)
     padded = [list(p.exterior.coords)[:-1] for p in polygons_of(blocked)]
 
     # The free space can be cut in several separate pieces: keep the one where the robot is

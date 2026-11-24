@@ -16,7 +16,7 @@ from shapely.prepared import prep
 EPS = 1e-3  # mm, tolerance: a segment that just touches a corner of the free space is accepted
 
 
-def pad_obstacles(obstacles, padding, map_size):
+def pad_obstacles(obstacles, padding, map_size, wall_padding=None):
     """Grow the obstacles by `padding` and compute the free space of the robot centre.
 
     buffer(padding): exact growing = rounded corners (disc of radius `padding` around each corner),
@@ -25,10 +25,16 @@ def pad_obstacles(obstacles, padding, map_size):
         that disc -> 2 corners per original corner, and the shape still contains the exact
         rounded one (never closer than `padding` to the obstacle).
     unary_union: obstacles whose padded shapes overlap are merged into one.
+    wall_padding: how far the map borders are pushed inwards (None -> same as `padding`,
+        0 -> the robot centre may go up to the map edge).
     """
-    grown = [Polygon(o).buffer(padding, join_style="mitre", mitre_limit=1.0) for o in obstacles]
+    if wall_padding is None:
+        wall_padding = padding
+    grown = [Polygon(o).buffer(padding, join_style="mitre", mitre_limit=1.0)
+             for o in obstacles if len(o) >= 3]  # a polygon needs at least 3 corners
     blocked = unary_union(grown)
-    workspace = box(padding, padding, map_size[0] - padding, map_size[1] - padding)
+    workspace = box(wall_padding, wall_padding,
+                    map_size[0] - wall_padding, map_size[1] - wall_padding)
     free_space = workspace.difference(blocked)
     return blocked, free_space
 
@@ -102,7 +108,7 @@ def a_star(graph, S, G):
     return path[::-1]
 
 
-def plan_path(obstacles, start, goal, padding, map_size):
+def plan_path(obstacles, start, goal, padding, map_size, wall_padding=None):
     """Shortest path from start to goal avoiding the padded obstacles.
 
     Returns:
@@ -110,7 +116,7 @@ def plan_path(obstacles, start, goal, padding, map_size):
         padded : padded obstacles, list of lists of (x, y) (for plotting)
         edges  : visibility graph edges, list of ((x, y), (x, y)) (for plotting)
     """
-    blocked, free_space = pad_obstacles(obstacles, padding, map_size)
+    blocked, free_space = pad_obstacles(obstacles, padding, map_size, wall_padding)
     padded = [list(p.exterior.coords)[:-1] for p in polygons_of(blocked)]
 
     start, goal = tuple(map(float, start)), tuple(map(float, goal))

@@ -5,11 +5,12 @@ import cv2
 import numpy as np
 
 
-MAP_W_MM = 976
-MAP_H_MM = 413
-PX_PER_MM = 1.0      
-ROBOT_RADIUS_MM = 30
-ROBOT_RADIUS_PX = int(ROBOT_RADIUS_MM * PX_PER_MM)
+from config import MAP_W_MM, MAP_H_MM   # shared with global navigation
+
+PX_PER_MM = 1.0
+# Obstacles are returned RAW (real outline): the robot-size padding is done by global navigation
+# (config.PADDING_MM). Put a value > 0 here only to grow them in vision as well.
+OBSTACLE_DILATION_MM = 0
 
 
 HSV = {
@@ -90,9 +91,11 @@ def detect_obstacles(warped):
     clean = np.zeros_like(mask_black)
     cv2.drawContours(clean, keep, -1, 255, thickness=-1)        # redraw them filled
 
-    # 3. pad
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * ROBOT_RADIUS_PX + 1, 2 * ROBOT_RADIUS_PX + 1))
-    clean = cv2.dilate(clean, kernel)
+    # 3. pad (off by default: global navigation pads the obstacles itself)
+    pad_px = int(OBSTACLE_DILATION_MM * PX_PER_MM)
+    if pad_px > 0:
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * pad_px + 1, 2 * pad_px + 1))
+        clean = cv2.dilate(clean, kernel)
 
     # 4. outline -> corners -> mm (small fixed epsilon so the corners don't cut into the padding)
     contours, _ = cv2.findContours(clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -129,6 +132,7 @@ def detect_robot(warped):
     
     bm, gm = px_to_mm(blue), px_to_mm(green)
 
+    # position = midpoint of the markers = centre of the robot body; heading = blue -> green
     x, y = (bm[0] + gm[0]) / 2, (bm[1] + gm[1]) / 2
     theta = math.atan2(gm[1] - bm[1], gm[0] - bm[0])
 
@@ -166,6 +170,27 @@ def draw_debug(warped, r):
         tip = to_px((x + 60 * math.cos(th), y + 60 * math.sin(th)))
         cv2.circle(out, c, 6, (0, 200, 255), -1)
         cv2.arrowedLine(out, c, tip, (0, 200, 255), 3, tipLength=0.3)
+    return out
+
+
+def mm_to_px(p):
+    """Map point in mm (origin bottom-left, y up) -> pixel of the warped image (y down)."""
+    return (int(round(p[0] * PX_PER_MM)), int(round((MAP_H_MM - p[1]) * PX_PER_MM)))
+
+
+def draw_plan(out, padded=(), path=None, edges=()):
+    """Draw the global navigation output on top of draw_debug's image (in place)."""
+    for a, b in edges:                                           # visibility graph (thin grey)
+        cv2.line(out, mm_to_px(a), mm_to_px(b), (200, 200, 200), 1)
+    for poly in padded:                                          # padded obstacles (cyan)
+        cv2.polylines(out, [np.array([mm_to_px(p) for p in poly])], True, (255, 255, 0), 2)
+    if path:                                                     # path + numbered waypoints
+        pts = np.array([mm_to_px(p) for p in path])
+        cv2.polylines(out, [pts], False, (255, 120, 0), 3)
+        for i, p in enumerate(pts):
+            cv2.circle(out, tuple(int(v) for v in p), 6, (255, 120, 0), -1)
+            cv2.putText(out, str(i), (int(p[0]) + 8, int(p[1]) - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 120, 0), 2)
     return out
 
 

@@ -9,4 +9,5 @@ dependencies:
   - jupyter
   - pip
   - pip:
+      - opencv-python                # vision
       - extremitypathfinder==2.8.0   # 3.0.0 returns paths through some obstacles

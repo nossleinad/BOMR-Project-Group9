@@ -1,12 +1,17 @@
-# Thymio project – Global navigation
+# Thymio project – Vision + Global navigation
 
 ## Setup
 
 ```bash
 conda env create -f environment.yml
 conda activate thymio-project
-python main.py
+python main.py          # camera 1 -> vision -> global path, drawn live (r = replan, e = graph, q = quit)
+python main.py 0        # other camera index
+python main.py map.png  # image file -> writes main_debug.png
+python global_nav_demo.py   # global navigation alone, on random maps (matplotlib)
 ```
+
+Shared constants (map size, robot radius, padding, planner choice) are in `config.py`.
 
 ## Files
 
