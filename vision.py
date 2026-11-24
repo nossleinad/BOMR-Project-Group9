@@ -5,8 +5,8 @@ import cv2
 import numpy as np
 
 
-MAP_W_MM = 976
-MAP_H_MM = 413
+MAP_W_MM = 400
+MAP_H_MM = 150
 PX_PER_MM = 1.0      
 ROBOT_RADIUS_MM = 30
 ROBOT_RADIUS_PX = int(ROBOT_RADIUS_MM * PX_PER_MM)
@@ -17,12 +17,10 @@ HSV = {
     "red":    [((0, 120, 80), (4, 255, 255)), ((170, 120, 80), (179, 255, 255))],  # red wraps around 0
     "green":  [((60, 80, 50), (90, 255, 255))],
     "blue":   [((95, 120, 50), (130, 255, 255))],
+    "purple": [((135, 80, 60), (160, 255, 255))],   # obstacles - TODO: tune on your real purple paper
 }
 
-BLACK_V_MAX = 70         
 MIN_BLOB_AREA = 100
-
-BLACK_S_MAX = 80  
 
          
 def color_mask(hsv_img, name):
@@ -80,14 +78,13 @@ def find_homography(img):
 def detect_obstacles(warped):
     hsv = cv2.cvtColor(warped, cv2.COLOR_BGR2HSV)
 
-    # 1. black = dark (low V) AND colourless (low S) -> a dark green or blue is no longer "black"
-    mask_black = ((hsv[:, :, 2] < BLACK_V_MAX) & (hsv[:, :, 1] < BLACK_S_MAX)).astype(np.uint8) * 255
-    mask_black = cv2.morphologyEx(mask_black, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+    # 1. obstacles = purple pixels (shadows are grey, not purple, so they are ignored)
+    mask_obst = color_mask(hsv, "purple")
 
-    # 2. keep only the real obstacles BEFORE padding, so small shadows don't get blown up
-    contours, _ = cv2.findContours(mask_black, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # 2. keep only the real obstacles BEFORE padding, so small purple specks don't get blown up
+    contours, _ = cv2.findContours(mask_obst, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     keep = [c for c in contours if cv2.contourArea(c) >= 20 * MIN_BLOB_AREA]
-    clean = np.zeros_like(mask_black)
+    clean = np.zeros_like(mask_obst)
     cv2.drawContours(clean, keep, -1, 255, thickness=-1)        # redraw them filled
 
     # 3. pad
@@ -155,9 +152,9 @@ def draw_debug(warped, r):
     out = warped.copy()
     to_px = lambda p: (int(p[0] * PX_PER_MM), int((MAP_H_MM - p[1]) * PX_PER_MM))
     for poly in r["obstacles"]:
-        cv2.polylines(out, [np.array([to_px(p) for p in poly])], True, (255, 0, 255), 2)
+        cv2.polylines(out, [np.array([to_px(p) for p in poly])], True, (0, 255, 255), 2)
         for p in poly:
-            cv2.circle(out, to_px(p), 5, (255, 0, 255), -1)
+            cv2.circle(out, to_px(p), 5, (0, 255, 255), -1)
     if r["goal"]:
         cv2.drawMarker(out, to_px(r["goal"]), (0, 0, 255), cv2.MARKER_CROSS, 30, 3)
     if r["robot"]:
@@ -185,7 +182,7 @@ if __name__ == "__main__":
     src = sys.argv[1] if len(sys.argv) > 1 else "1"     # default: camera 1 (external webcam)
 
     if src.isdigit():                                    # a number -> live camera
-        cap = cv2.VideoCapture(int(src), cv2.CAP_DSHOW)  # CAP_DSHOW: opens faster on Windows
+        cap = cv2.VideoCapture(int(src))
         if not cap.isOpened():
             sys.exit(f"Could not open camera {src} - try another index (0, 1, 2...).")
         H_cache = None
