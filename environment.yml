@@ -1,0 +1,12 @@
+name: thymio-project
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - numpy
+  - matplotlib
+  - shapely
+  - jupyter
+  - pip
+  - pip:
+      - extremitypathfinder==2.8.0   # 3.0.0 returns paths through some obstacles
