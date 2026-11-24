@@ -6,7 +6,7 @@ Vision runs on EVERY frame (later the camera also measures the robot pose for th
 Obstacles and goal are taken ONCE: the path is planned on the first frame where the beacons,
 the robot and the goal are all found, then the obstacles, goal and path are frozen.
 
-Run with:  conda activate thymio-project  then
+Run with:  conda activate thymio-bomr  then
     python main.py            camera 1 (default)
     python main.py 0          another camera index
     python main.py map.png    an image file (plans once, writes main_debug.png)

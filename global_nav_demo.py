@@ -1,6 +1,6 @@
 """Global navigation demo: map -> padded obstacles -> visibility graph -> shortest path -> plot.
 
-Run with:  conda activate thymio-project  then  python global_nav_demo.py
+Run with:  conda activate thymio-bomr  then  python global_nav_demo.py
 """
 import matplotlib.pyplot as plt
 

@@ -4,12 +4,20 @@
 
 ```bash
 conda env create -f environment.yml
-conda activate thymio-project
+conda activate thymio-bomr
 python main.py          # camera 1 -> vision -> global path, drawn live (r = replan, e = graph, q = quit)
 python main.py 0        # other camera index
 python main.py map.png  # image file -> writes main_debug.png
 python global_nav_demo.py   # global navigation alone, on random maps (matplotlib)
 ```
+
+`environment.yml` is the **one environment for every part** (vision, global/local navigation,
+filtering, motion control, notebooks); versions are pinned. In VS Code / Jupyter pick the
+interpreter or kernel `thymio-bomr`. Filtering tests: `cd FilteringnMotionControl && python test_project.py`.
+
+- numpy uses **OpenBLAS**, not MKL (`libblas=*=*openblas`): with MKL, `np.linalg` (Kalman filter,
+  extremitypathfinder) crashed Python on Windows without any error message.
+- Adding a package: add it to `environment.yml` (pinned), then `conda env update -f environment.yml --prune`.
 
 Shared constants (map size, robot radius, padding, planner choice) are in `config.py`.
 
@@ -17,7 +25,10 @@ Shared constants (map size, robot radius, padding, planner choice) are in `confi
 
 | File | Role |
 |------|------|
-| `main.py` | Links everything: map → path planning (both versions) → plot |
+| `main.py` | Camera → `vision.py` (every frame) → global path planned once (frozen, `r` to replan) → drawn on the camera view |
+| `config.py` | Shared constants and conventions (map size, robot radius, padding, planner) |
+| `vision.py` | Homography from the 4 orange beacons, obstacles (raw, not padded), goal, robot pose |
+| `global_nav_demo.py` | Global navigation alone: random map → path planning (both versions) → plot |
 | `visualization.py` | Random map generator + plot of the map, padding, visibility graph and path |
 | `global_nav_mix.py` | **Mix version**: shapely for padding + collision tests, our own visibility graph and A* |
 | `global_nav_lib.py` | **Library version**: shapely for padding, extremitypathfinder for visibility graph + shortest path |
@@ -36,7 +47,7 @@ All in **millimetres**, origin **bottom-left**, x right, y up.
 obstacles = [[(x1, y1), (x2, y2), (x3, y3), ...],   # obstacle 1, corners in order around it
              [(x1, y1), (x2, y2), ...],              # obstacle 2
              ...]
-start   = (x, y)        # centre between the Thymio wheels
+start   = (x, y)        # centre of the Thymio BODY (midpoint of the blue/green markers)
 heading = theta         # radians, 0 = +x, counter-clockwise positive
 goal    = (x, y)        # centre of the goal
 ```
@@ -54,6 +65,10 @@ of free space, so a path always exists.
 Output for motion control: `path = [(x0, y0), (x1, y1), ..., (xg, yg)]` in mm, start first, goal last.
 
 ## Method
+
+> **Values used in the project** (decided when merging with vision, see `config.py` and `TEAM_NOTES.md`):
+> robot point = centre of the body, `PADDING = 56 + 10 = 66 mm`, walls NOT padded (`wall_padding=0`).
+> The text below describes the original design.
 
 1. **Padding (configuration space).** The robot is reduced to one point, the centre between
    its wheels. Each obstacle is grown by `PADDING = ROBOT_RADIUS + MARGIN` and the walls are

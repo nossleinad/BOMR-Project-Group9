@@ -1,13 +1,24 @@
-name: thymio-project
+# ONE environment for every part of the project (vision, global navigation, local navigation,
+# filtering, motion control, notebooks).
+#   conda env create -f environment.yml
+#   conda activate thymio-bomr
+# Versions are pinned so that everybody gets the same thing.
+name: thymio-bomr
 channels:
   - conda-forge
 dependencies:
   - python=3.12
-  - numpy
-  - matplotlib
-  - shapely
+  - numpy=2.5.5
+  # OpenBLAS instead of MKL: with MKL, np.linalg (Kalman filter, extremitypathfinder) crashed
+  # Python on Windows (missing threading runtime, error 0xC06D007F)
+  - libblas=*=*openblas
+  - matplotlib=3.11.2
+  - shapely=2.2.0                    # global navigation (padding, collision tests)
+  - networkx                         # needed by extremitypathfinder
   - jupyter
+  - ipykernel=7.4.0
   - pip
   - pip:
-      - opencv-python                # vision
-      - extremitypathfinder==2.8.0   # 3.0.0 returns paths through some obstacles
+      - opencv-python==5.1.0.95      # vision
+      - extremitypathfinder==2.8.0   # global navigation, lib version (3.0.0 returns paths through some obstacles)
+      - tdmclient==0.1.21            # communication with the Thymio

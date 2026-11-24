@@ -1,4 +1,11 @@
-ipykernel==7.4.0
-matplotlib==3.11.2
+# Same packages and versions as ../environment.yml (the project environment): keep both in sync.
+# Prefer: conda env create -f ../environment.yml   (pip numpy wheels already use OpenBLAS)
 numpy==2.5.5
+matplotlib==3.11.2
+shapely==2.2.0
+networkx
+ipykernel==7.4.0
+jupyter
+opencv-python==5.1.0.95
+extremitypathfinder==2.8.0
 tdmclient==0.1.21
