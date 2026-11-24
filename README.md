@@ -8,7 +8,7 @@ conda activate thymio-bomr
 python main.py          # camera 1 -> vision -> global path, drawn live (r = replan, e = graph, q = quit)
 python main.py 0        # other camera index
 python main.py map.png  # image file -> writes main_debug.png
-python global_nav_demo.py   # global navigation alone, on random maps (matplotlib)
+python vision.py        # vision alone (camera 1, or an image file as argument)
 ```
 
 `environment.yml` is the **one environment for every part** (vision, global/local navigation,
@@ -19,27 +19,20 @@ interpreter or kernel `thymio-bomr`. Filtering tests: `cd FilteringnMotionContro
   extremitypathfinder) crashed Python on Windows without any error message.
 - Adding a package: add it to `environment.yml` (pinned), then `conda env update -f environment.yml --prune`.
 
-Shared constants (map size, robot radius, padding, planner choice) are in `config.py`.
-
 ## Files
 
 | File | Role |
 |------|------|
 | `main.py` | Camera → `vision.py` (every frame) → global path planned once (frozen, `r` to replan) → drawn on the camera view |
-| `config.py` | Shared constants and conventions (map size, robot radius, padding, planner) |
+| `config.py` | Shared constants and conventions (map size, robot radius, padding) |
 | `vision.py` | Homography from the 4 orange beacons, obstacles (raw, not padded), goal, robot pose |
-| `global_nav_demo.py` | Global navigation alone: random map → path planning (both versions) → plot |
-| `visualization.py` | Random map generator + plot of the map, padding, visibility graph and path |
-| `global_nav_mix.py` | **Mix version**: shapely for padding + collision tests, our own visibility graph and A* |
-| `global_nav_lib.py` | **Library version**: shapely for padding, extremitypathfinder for visibility graph + shortest path |
-
-Both planners have the same function:
+| `global_nav_lib.py` | Global navigation: shapely for padding, extremitypathfinder for visibility graph + shortest path |
 
 ```python
-path, padded, edges = plan_path(obstacles, start, goal, padding, map_size)
+path, padded, edges = global_nav_lib.plan_path(obstacles, start, goal, padding, map_size, wall_padding)
 ```
 
-## Data format (agreed with vision)
+## Data format (agreed between vision and global navigation)
 
 All in **millimetres**, origin **bottom-left**, x right, y up.
 
@@ -48,49 +41,43 @@ obstacles = [[(x1, y1), (x2, y2), (x3, y3), ...],   # obstacle 1, corners in ord
              [(x1, y1), (x2, y2), ...],              # obstacle 2
              ...]
 start   = (x, y)        # centre of the Thymio BODY (midpoint of the blue/green markers)
-heading = theta         # radians, 0 = +x, counter-clockwise positive
-goal    = (x, y)        # centre of the goal
+heading = theta         # radians, 0 = +x, counter-clockwise positive (blue -> green marker)
+goal    = (x, y)        # centre of the red goal
 ```
 
 A list of lists is needed (not one flat list of points): the planner must know which corners
 belong to the same obstacle to (1) grow each obstacle and (2) know that a line between two
 corners of the same obstacle goes *through* it. `cv2.findContours` + `cv2.approxPolyDP`
-already return one ordered contour per obstacle. Vision must flip y (images have y down)
-and convert pixels to mm.
+already return one ordered contour per obstacle. Vision flips y (images have y down)
+and converts pixels to mm.
 
-The random map generator uses the same padding, puts obstacles at least 100 mm apart and from
-the walls (some padded obstacles merge on purpose), and draws start and goal in the same piece
-of free space, so a path always exists.
-
-Output for motion control: `path = [(x0, y0), (x1, y1), ..., (xg, yg)]` in mm, start first, goal last.
+Output for motion control: `path = [(x0, y0), (x1, y1), ..., (xg, yg)]` in mm, start first, goal
+last (`None` if there is no path).
 
 ## Method
 
-> **Values used in the project** (decided when merging with vision, see `config.py` and `TEAM_NOTES.md`):
-> robot point = centre of the body, `PADDING = 56 + 10 = 66 mm`, walls NOT padded (`wall_padding=0`).
-> The text below describes the original design.
-
-1. **Padding (configuration space).** The robot is reduced to one point, the centre between
-   its wheels. Each obstacle is grown by `PADDING = ROBOT_RADIUS + MARGIN` and the walls are
-   moved inwards by the same amount. If the point stays out of the grown obstacles, the real
-   robot does not touch the real obstacles, even when it turns on the spot.
-   - `ROBOT_RADIUS = 80 mm`: distance from the wheel-axle centre to the farthest point of the
-     body (Thymio is 110 × 112 mm, the axle is not in the middle) — **measure it on the robot**.
-   - `MARGIN = 20 mm`: error of vision / localisation / motion control.
-2. **Visibility graph.** Nodes = start, goal and the corners of the free space.
-   Two nodes are linked if the straight segment between them stays in the free space.
+1. **Padding (configuration space).** The robot is reduced to one point, the centre of its
+   body. Each obstacle is grown by `PADDING_MM = ROBOT_RADIUS_MM + MARGIN_MM = 56 + 10 = 66 mm`
+   (`config.py`). If the point stays out of the grown obstacles, the real robot does not touch
+   the real obstacles. The walls are not grown (`WALL_PADDING_MM = 0`).
+   - `ROBOT_RADIUS_MM = 56`: half the body size (Thymio ≈ 110 × 112 mm). The rear corners are
+     ~79 mm from the centre and can clip an obstacle when the robot turns right next to it.
+   - `MARGIN_MM = 10`: error of vision / localisation / motion control.
+2. **Visibility graph.** Nodes = start, goal and the corners of the free space where a path can
+   bend. Two nodes are linked if the straight segment between them stays in the free space.
    Edge cost = Euclidean length. The shortest path in a polygonal map always goes from
    corner to corner, so this graph contains it.
-3. **Shortest path.** A* with Euclidean distance to the goal as heuristic (both versions). It
-   never overestimates the remaining distance, so A* returns the same optimal path as Dijkstra
-   while exploring fewer nodes.
+3. **Shortest path.** A* with the Euclidean distance to the goal as heuristic. It never
+   overestimates the remaining distance, so A* returns the same optimal path as Dijkstra while
+   exploring fewer nodes.
 
-Check done: on 1000 random maps both versions give the same path length and no path segment
-enters a padded obstacle.
+Checks done: on 1000 random maps the library gave the same path length as an independent
+implementation (our own visibility graph + A*, removed since), and on 500 random maps of the
+real size (976 × 413 mm, padding 66 mm) no path segment enters a padded obstacle.
 
 ## Libraries and their parameters
 
-### shapely (both versions)
+### shapely
 Geometry library (wrapper of GEOS, the engine used in GIS software / PostGIS).
 - `Polygon(corners).buffer(padding, join_style="mitre", mitre_limit=1.0)` grows the polygon by
   `padding` (Minkowski sum with a disc of radius `padding`).
@@ -103,26 +90,21 @@ Geometry library (wrapper of GEOS, the engine used in GIS software / PostGIS).
     sharp corners that block passages for nothing.
 - `unary_union(...)`: merges grown obstacles that overlap (two obstacles too close for the
   robot to pass between them become one).
-- `box(...).difference(...)`: free space = shrunk map minus grown obstacles.
-- `free.covers(LineString([a, b]))`: is the segment entirely in the free space? It is
-  slightly enlarged (`buffer(EPS)`, EPS = 0.001 mm) so a segment that touches a corner exactly
-  is accepted despite floating-point rounding.
-- `prep(...)`: pre-processes the geometry once so the many `covers` tests are faster.
+- `box(...).difference(...)`: free space = map minus grown obstacles.
+- `covers(Point(p))` on the free space slightly enlarged (`buffer(EPS)`, EPS = 0.001 mm): is the
+  start / goal in the free space, despite floating-point rounding?
 
-### extremitypathfinder 2.8.0 (library version only)
+### extremitypathfinder 2.8.0
 Visibility graph + A* for polygon maps (Vinther et al., *Pathfinding in Two-dimensional Worlds*).
 The map is one **boundary** polygon (the robot stays inside) with **holes** (obstacles).
-- Our free space (shrunk map minus padded obstacles) is exactly that: shapely gives it as
+- Our free space (map minus padded obstacles) is exactly that: shapely gives it as
   pieces; we take the piece that contains the start. If the goal is not in it → no path.
 - `orient(region, sign=1.0)`: boundary counter-clockwise, holes clockwise, as the library requires.
 - `store(boundary, holes)` computes the visibility graph, but only between **extremities**
   (corners pointing into the free space, i.e. reflex corners): a shortest path can only bend
-  there, so the other corners are useless. Smaller graph than ours, same result.
+  there, so the other corners are useless.
 - `find_shortest_path(start, goal)` adds start and goal to the graph and runs A*
   (Euclidean heuristic).
 - Version pinned to 2.8.0: 3.0.0 returned paths crossing merged obstacles in our tests.
 - Why not pyvisgraph (the classic one)? It knows only obstacles, not walls. Cutting the obstacles
   at the walls made it slide along the wall *under* an obstacle; our test caught it.
-
-### heapq (mix version, standard library)
-Priority queue used for A*, exactly as in the Exercise 5 solution.

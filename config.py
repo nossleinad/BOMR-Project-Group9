@@ -22,5 +22,3 @@ ROBOT_RADIUS_MM = 56
 MARGIN_MM = 10                              # vision / localisation / control errors
 PADDING_MM = ROBOT_RADIUS_MM + MARGIN_MM    # obstacles are grown ONCE, by global navigation
 WALL_PADDING_MM = 0                         # map borders are not grown
-
-PLANNER = "mix"   # "mix" (shapely + own visibility graph + A*) or "lib" (extremitypathfinder)

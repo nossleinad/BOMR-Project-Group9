@@ -20,19 +20,8 @@ import time
 import cv2
 
 import config
+import global_nav_lib
 import vision
-
-
-def get_planner(name):
-    """Import only the planner we use (the "lib" one needs extremitypathfinder installed)."""
-    if name == "lib":
-        import global_nav_lib as planner
-    else:
-        import global_nav_mix as planner
-    return planner
-
-
-planner = get_planner(config.PLANNER)
 
 
 def make_plan(r):
@@ -43,9 +32,9 @@ def make_plan(r):
         return None, "goal not found"
     start = r["robot"][:2]
     t0 = time.perf_counter()
-    path, padded, edges = planner.plan_path(r["obstacles"], start, r["goal"],
-                                            config.PADDING_MM, config.MAP_SIZE,
-                                            config.WALL_PADDING_MM)
+    path, padded, edges = global_nav_lib.plan_path(r["obstacles"], start, r["goal"],
+                                                   config.PADDING_MM, config.MAP_SIZE,
+                                                   config.WALL_PADDING_MM)
     dt = time.perf_counter() - t0
     if path is None:
         return None, "no path (start/goal inside a padded obstacle, or goal unreachable)"
