@@ -6,30 +6,32 @@ States: GLOBAL (follow the path) <-> LOCAL (go around the obstacle)
 
 import math
 
-ENTER_THRESHOLD = 2100     # prox value at ~10 cm -> switch to LOCAL
+ENTER_THRESHOLD = 2100     # prox value at ~75 mm -> switch to LOCAL
 EXIT_THRESHOLD = 1000      # lower than ENTER_THRESHOLD (hysteresis)
-DANGER_THRESHOLD = 3500    # very close -> turn on the spot
-MIN_LOCAL_STEPS = 5     # minimum number of steps spent in LOCAL
+DANGER_THRESHOLD = 3500    # ~40 mm -> turn on the spot
+MIN_LOCAL_STEPS = 5        # minimum number of steps spent in LOCAL
 
-OBSTACLE_RADIUS = 4.0     # cm
-ROBOT_HALF_WIDTH = 5.5    # cm
-MARGIN = 2.0              # cm
+OBSTACLE_RADIUS = 40.0     # mm
+ROBOT_HALF_WIDTH = 56.0    # mm, body centre -> side
+MARGIN = 20.0              # mm
 
-TURN_SPEED = 100          # motor units, TURN_AWAY phase
-ARC_SPEED = 100           # motor units, ARC phase
+TURN_SPEED = 100           # motor units, TURN_AWAY phase
+ARC_SPEED = 100            # motor units, ARC phase
 
-REACH_RADIUS = 3.0        # cm
+REACH_RADIUS = 30.0        # mm
 
-K_RADIAL = 0.25                    # rad/cm
+K_RADIAL = 0.025                   # rad/mm
 MAX_CORRECTION = math.radians(60)  # rad
 K_HEADING = 120                    # motor units/rad
 W_MAX = 150                        # motor units
 
 SENSOR_ANGLES_DEG = [40, 20, 0, -20, -40]  # sensors 0..4, + = left
-SENSOR_OFFSET = 8.0                        # cm, axle centre -> front sensors
+SENSOR_OFFSET = 55.0                       # mm, body centre -> front sensors (TODO: measure)
 MEASURE_THRESHOLD = 1900
-PROX_A = -396.05                           # value = PROX_A * d + PROX_B
+PROX_A = -39.605                           # value = PROX_A * d + PROX_B, d in mm
 PROX_B = 5105.4
+PROX_MIN_MM = 35.0                         # valid range of the calibration
+PROX_MAX_MM = 85.0
 
 
 class LocalNavigation:
@@ -49,8 +51,8 @@ class LocalNavigation:
         """Run one control step. Called at every loop iteration by the main.
 
         prox        : list of 7 values (prox.horizontal)
-        pose        : (x, y, theta) from the filter
-        waypoint    : (x, y) current target of the global path
+        pose        : (x, y, theta) from the filter, mm and rad, body centre
+        waypoint    : (x, y) current target of the global path, mm
         map_is_free : function (x, y) -> bool given by global navigation
         returns     : (state, left_speed, right_speed),
                       speeds are None when state == "GLOBAL"
@@ -206,10 +208,10 @@ def wrap_angle(a):
 
 
 def prox_to_distance(value):
-    """Convert a raw proximity value into a distance [cm] with the
+    """Convert a raw proximity value into a distance [mm] with the
     calibration, limited to the sensor range."""
     d = (value - PROX_B) / PROX_A
-    return min(max(d, 3.5), 8.5)
+    return min(max(d, PROX_MIN_MM), PROX_MAX_MM)
 
 
 def estimate_obstacle_centre(prox, pose):
