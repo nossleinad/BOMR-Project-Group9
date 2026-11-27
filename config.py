@@ -15,13 +15,24 @@ MAP_W_MM = 976
 MAP_H_MM = 413
 MAP_SIZE = (MAP_W_MM, MAP_H_MM)
 
+# Thymio geometry:
 # Thymio body is ~110 x 112 mm. Radius measured from the body centre:
 #   56 mm = half the body length/width -> safe when driving straight past an obstacle,
 #   but the rear corners (~79 mm from the centre) can clip an obstacle when turning near one.
 ROBOT_RADIUS_MM = 56
+AXLE_TO_CENTRE_MM = 24.5       # TODO: measure (wheel axle -> body centre / marker)
+
 # Vision / localisation / control errors. 20 mm (not 10) because vision simplifies each obstacle
 # outline with epsilon = 2% of its perimeter: the polygon can cut up to that much INTO the
 # obstacle (~9 mm for a 150 mm wide round obstacle).
 MARGIN_MM = 20
 PADDING_MM = ROBOT_RADIUS_MM + MARGIN_MM    # obstacles are grown ONCE, by global navigation
 WALL_PADDING_MM = 0                         # map borders are not grown
+
+# Control loop
+TS = 0.1                       # s, control period
+MAX_UNITS = 400                # motor saturation
+
+# Mission
+GOAL_RADIUS_MM = 30.0          # goal reached
+KIDNAP_DIST_MM = 150.0         # camera vs filter distance -> kidnapping

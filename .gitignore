@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 main_debug.png
 vision_debug.png
+.DS_Store
